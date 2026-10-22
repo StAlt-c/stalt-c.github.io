@@ -1,0 +1,1320 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Schranken-Check</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+/* Layout: eine schmale Spalte für den Blick im Auto. Oben die Empfehlung, darunter alle Übergänge mit Zeitstrahl.
+   Karte und Einstellungen öffnen sich nur bei Bedarf. */
+:root {
+  --bg: #eceff2;
+  --surface: #ffffff;
+  --ink: #14181d;
+  --muted: #566170;
+  --line: #d3d9e0;
+  --accent: #0b4a8f;
+  --accent-ink: #ffffff;
+  --go: #0a7d3a;
+  --go-bg: #dcf2e4;
+  --warn: #7a4e00;
+  --warn-bg: #fbeecb;
+  --stop: #c4121f;
+  --stop-bg: #fbe0e2;
+  --font-display: 'Barlow Condensed', 'DIN Condensed', 'Arial Narrow', sans-serif;
+  --font-body: 'Barlow', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1216; --surface: #171d24; --ink: #eef1f4; --muted: #9ba7b5; --line: #2a333d;
+    --accent: #7db8ff; --accent-ink: #0b1a2b;
+    --go: #4fd783; --go-bg: #11301e; --warn: #f1bb45; --warn-bg: #372a09; --stop: #ff7070; --stop-bg: #3b1519;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1216; --surface: #171d24; --ink: #eef1f4; --muted: #9ba7b5; --line: #2a333d;
+  --accent: #7db8ff; --accent-ink: #0b1a2b;
+  --go: #4fd783; --go-bg: #11301e; --warn: #f1bb45; --warn-bg: #372a09; --stop: #ff7070; --stop-bg: #3b1519;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.45 var(--font-body);
+  padding-block: max(16px, env(safe-area-inset-top, 0px)) max(32px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 640px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+button, input, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 auto; }
+.top .ghost { flex: none; }
+.brand svg { width: 34px; height: 34px; flex: none; }
+h1 { font: 700 28px/1 var(--font-display); letter-spacing: .02em; text-transform: uppercase; margin: 0; }
+.ghost { background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; min-height: 40px; }
+.ghost[aria-expanded="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+.controls { display: flex; flex-direction: column; gap: 10px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; border: 2px solid var(--ink); border-radius: 10px; overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 12px 8px; min-height: 48px; font: 600 20px/1 var(--font-display); letter-spacing: .03em; text-transform: uppercase; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.chips .lbl { color: var(--muted); font-size: 14px; margin-right: 2px; }
+.chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 6px 14px; min-height: 38px; font-weight: 500; }
+.chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+
+.rec { border-radius: 14px; padding: 18px; display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; border: 2px solid transparent; }
+.rec.free { background: var(--go-bg); border-color: var(--go); }
+.rec.tight { background: var(--warn-bg); border-color: var(--warn); }
+.rec.closed { background: var(--stop-bg); border-color: var(--stop); }
+.rec.unknown { background: var(--surface); border-color: var(--line); }
+.rec .sig { width: 54px; height: 54px; }
+.rec .kicker { font: 600 14px/1 var(--font-display); letter-spacing: .09em; text-transform: uppercase; opacity: .85; }
+.rec h2 { font: 700 34px/1.05 var(--font-display); margin: 4px 0 6px; text-wrap: balance; overflow-wrap: anywhere; }
+.rec p { margin: 0; }
+.rec .hint { margin-top: 8px; font-weight: 500; }
+.rec .acts { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
+.rec.free .kicker, .rec.free h2 { color: var(--go); }
+.rec.tight .kicker, .rec.tight h2 { color: var(--warn); }
+.rec.closed .kicker, .rec.closed h2 { color: var(--stop); }
+
+.notice { background: var(--warn-bg); color: var(--warn); border-radius: 10px; padding: 10px 14px; font-size: 14px; }
+.notice.err { background: var(--stop-bg); color: var(--stop); }
+
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.row { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.row .head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.row .name { font: 600 22px/1.1 var(--font-display); letter-spacing: .01em; overflow-wrap: anywhere; }
+.row .meta { color: var(--muted); font-size: 14px; font-variant-numeric: tabular-nums; }
+.pill { flex: none; font: 700 17px/1 var(--font-display); letter-spacing: .05em; text-transform: uppercase; padding: 7px 10px; border-radius: 6px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pill.free { background: var(--go-bg); color: var(--go); }
+.pill.tight { background: var(--warn-bg); color: var(--warn); }
+.pill.closed { background: var(--stop-bg); color: var(--stop); }
+.pill.unknown { background: var(--bg); color: var(--muted); }
+.best-tag { font: 600 12px/1 var(--font-display); letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+
+.tl { position: relative; height: 22px; border-radius: 4px; background: var(--bg); overflow: hidden; }
+.tl .seg-closed { position: absolute; top: 0; bottom: 0; background: var(--stop); opacity: .85; min-width: 3px; }
+.tl .me { position: absolute; top: -2px; bottom: -2px; width: 3px; background: var(--ink); box-shadow: 0 0 0 2px var(--surface); }
+.tl-scale { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-top: -4px; font-variant-numeric: tabular-nums; }
+
+details.trains summary { cursor: pointer; color: var(--accent); font-weight: 500; font-size: 14px; min-height: 28px; }
+.trains ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.trains li { display: grid; grid-template-columns: 3.4em 1fr; gap: 8px; font-variant-numeric: tabular-nums; }
+.trains .t { font-weight: 600; }
+.trains .d { color: var(--muted); }
+.trains .late { color: var(--warn); }
+
+.foot { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; }
+.foot a { color: var(--accent); }
+.foot button { background: none; border: 0; padding: 0; color: var(--accent); text-decoration: underline; font-size: 13px; }
+.legend { color: var(--muted); font-size: 13px; margin: 0; }
+
+/* Karte */
+.mapbox { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+.maptools { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; }
+.maptools form { display: flex; gap: 8px; flex: 1 1 220px; min-width: 0; }
+.maptools input { flex: 1; min-width: 0; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 9px 10px; min-height: 42px; }
+#map.dark-tiles .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.95) contrast(.9); }
+#map { height: min(58vh, 480px); min-height: 300px; width: 100%; background: var(--bg); position: relative; z-index: 0; isolation: isolate; }
+.mapstatus { padding: 8px 12px; font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); }
+.mapstatus.err { color: var(--stop); }
+.mapstatus .btn { margin-left: 6px; color: var(--ink); }
+.pickcard { padding: 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.pickcard h3 { font: 600 22px/1.1 var(--font-display); margin: 0; overflow-wrap: anywhere; }
+.pickcard p { margin: 0; font-size: 14px; color: var(--muted); }
+.stchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.stchip { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; font-size: 14px; }
+.mk { display: grid; place-items: center; width: 36px; height: 36px; }
+.mk .dot { display: grid; place-items: center; box-sizing: border-box; font: 700 12px/1 var(--font-display); letter-spacing: .03em; color: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.4), 0 1px 4px rgba(0,0,0,.4); }
+.mk-x .dot { width: 22px; height: 22px; border-radius: 50%; background: var(--stop); border: 3px solid #fff; }
+.mk-x.sel .dot { width: 32px; height: 32px; border-width: 4px; outline: 3px solid var(--ink); }
+.mk-m .dot { width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: var(--bg); border: 3px solid #fff; }
+.mk-s .dot { width: 30px; height: 22px; border-radius: 5px; background: var(--accent); color: var(--accent-ink); border: 2px solid #fff; }
+.mk-s.off .dot { background: var(--surface); color: var(--accent); border: 2px solid var(--accent); }
+.leaflet-tooltip { font: 600 13px/1.2 var(--font-body); }
+
+/* Einstellungen */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+.panel h2 { font: 700 24px/1 var(--font-display); text-transform: uppercase; letter-spacing: .03em; margin: 0; }
+.panel h3 { font: 600 20px/1.1 var(--font-display); margin: 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field label { font-size: 13px; color: var(--muted); }
+.field input { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 9px 10px; min-height: 42px; width: 100%; min-width: 0; }
+.cross { border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+.stn-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.stn { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; border-left: 3px solid var(--line); padding-left: 10px; }
+.stn .nm { font-weight: 600; }
+.stn .st { color: var(--muted); font-size: 13px; flex: 1 1 160px; min-width: 0; }
+.stn .st.bad { color: var(--stop); }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 8px 12px; min-height: 40px; }
+.btn.sm { min-height: 32px; padding: 4px 10px; font-size: 14px; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn.danger { color: var(--stop); }
+.btns { display: flex; flex-wrap: wrap; gap: 8px; }
+.small { font-size: 13px; color: var(--muted); margin: 0; }
+details.adv > summary { cursor: pointer; font-weight: 600; min-height: 32px; }
+details.adv[open] > summary { margin-bottom: 12px; }
+.diag { margin: 8px 0 0; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
+.diag .ok { color: var(--go); }
+.diag .bad { color: var(--stop); }
+.diag a { color: var(--accent); }
+@media (max-width: 420px) {
+  h1 { font-size: 23px; }
+  .brand svg { width: 28px; height: 28px; }
+  .rec { grid-template-columns: 1fr; }
+  .rec h2 { font-size: 30px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rec, .pill { transition: background-color .25s, border-color .25s; }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="andreas" viewBox="0 0 48 48">
+    <g transform="rotate(45 24 24)">
+      <rect x="1" y="18" width="46" height="12" fill="var(--stop)"/>
+      <rect x="18" y="1" width="12" height="46" fill="var(--stop)"/>
+      <rect x="3.5" y="20.5" width="41" height="7" fill="#fff"/>
+      <rect x="20.5" y="3.5" width="7" height="41" fill="#fff"/>
+      <rect x="20.5" y="20.5" width="7" height="7" fill="#fff"/>
+    </g>
+  </symbol>
+</svg>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><svg aria-hidden="true"><use href="#andreas"/></svg><h1>Schranken-Check</h1></div>
+    <button class="ghost" id="btn-settings" type="button" aria-expanded="false" aria-controls="settings">Einstellungen</button>
+  </header>
+
+  <section class="mapbox" id="mapSection" aria-label="Karte" hidden>
+    <div class="maptools">
+      <form id="place-form" role="search">
+        <input id="place-q" type="search" placeholder="Ort suchen, z. B. Stadtname" autocomplete="off" aria-label="Ort suchen">
+        <button class="btn" type="submit">Suchen</button>
+      </form>
+      <button class="btn" id="btn-locate" type="button">Mein Standort</button>
+    </div>
+    <div id="map" role="application" aria-label="Karte mit Bahnübergängen und Bahnhöfen"></div>
+    <div class="mapstatus" id="map-status" aria-live="polite"><span id="map-status-text"></span> <button type="button" class="btn sm" id="map-retry" hidden>Erneut versuchen</button></div>
+    <div class="pickcard" id="pick-card"></div>
+  </section>
+
+  <section class="controls" aria-label="Fahrt">
+    <div class="seg" role="group" aria-label="Fahrtrichtung">
+      <button id="dir-work" type="button" aria-pressed="true">Zur Arbeit</button>
+      <button id="dir-home" type="button" aria-pressed="false">Nach Hause</button>
+    </div>
+    <div class="chips" role="group" aria-label="Abfahrt" id="shift-chips"></div>
+  </section>
+
+  <main id="result" aria-live="polite"></main>
+  <section id="settings" class="panel" hidden></section>
+</div>
+
+<script>
+// Reine Berechnungslogik: keine DOM- oder Netzwerkzugriffe.
+const MIN = 60000;
+
+/* ---------- Geometrie ---------- */
+function distM(a, b) {
+  const R = 6371000, k = Math.PI / 180;
+  const dLat = (b.lat - a.lat) * k, dLon = (b.lon - a.lon) * k;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * k) * Math.cos(b.lat * k) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+// Meter-Koordinaten relativ zum Ursprung o (lokale Näherung, reicht für wenige Kilometer)
+function toXY(p, o) {
+  return { x: (p.lon - o.lon) * 111320 * Math.cos(o.lat * Math.PI / 180), y: (p.lat - o.lat) * 110540 };
+}
+
+// Abstand des Punkts X zur Strecke A-B und Position t (0..1) des nächsten Punkts auf der Strecke
+function projectOnSegment(X, A, B) {
+  const a = toXY(A, X), b = toXY(B, X);
+  const dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy;
+  let t = len2 ? -(a.x * dx + a.y * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return { dist: Math.hypot(a.x + t * dx, a.y + t * dy), t, len: Math.sqrt(len2) };
+}
+
+/* ---------- Zugverlauf -> Durchfahrtszeit am Übergang ----------
+   stops: [{ lat, lon, planArr, planDep, arr, dep, arrDelay, depDelay }] (Zeiten in ms)
+   Liegt der Übergang auf einem Abschnitt zwischen zwei Halten, wird die Fahrplanzeit
+   anteilig zwischen Abfahrt am ersten und Ankunft am zweiten Halt berechnet. */
+function passageFromTrip(X, stops) {
+  let best = null;
+  for (let i = 0; i + 1 < stops.length; i++) {
+    const a = stops[i], b = stops[i + 1];
+    if (!isFinite(a.lat) || !isFinite(b.lat) || !isFinite(a.lon) || !isFinite(b.lon)) continue;
+    const pr = projectOnSegment(X, a, b);
+    // Gerade Linie zwischen zwei Halten weicht von der echten Strecke ab: Toleranz wächst mit der Länge
+    const tol = Math.min(1500, Math.max(400, 0.12 * pr.len));
+    if (pr.dist <= tol && (!best || pr.dist < best.pr.dist)) best = { i, pr };
+  }
+  if (!best) return null;
+  const a = stops[best.i], b = stops[best.i + 1];
+  const tA = firstNum(a.planDep, a.planArr, a.dep, a.arr);
+  const tB = firstNum(b.planArr, b.planDep, b.arr, b.dep);
+  if (tA == null || tB == null) return null;
+  return {
+    planned: tA + best.pr.t * (tB - tA),
+    seg: best.i,
+    dist: best.pr.dist,
+    delayHint: firstNum(a.depDelay, b.arrDelay)
+  };
+}
+
+function firstNum() {
+  for (const v of arguments) if (typeof v === 'number' && isFinite(v)) return v;
+  return null;
+}
+
+/* ---------- Passagen sammeln ----------
+   Für jeden gewählten Bahnhof liegen Abfahrten (dep) und Ankünfte (arr) vor. Jede Fahrt hat einen
+   Verlauf (Trip). Passiert die Fahrt den Übergang, entsteht genau eine Passage (je tripId).
+   getBoard(station) -> { dep, arr } | { error } | null
+   getTrip(tripId, event) -> { stops } | { error } | null (null = wird noch geladen) */
+function collectPassages(c, getBoard, getTrip, nowMs) {
+  const byTrip = new Map();
+  const perStation = {};
+  let pending = 0, failedTrips = 0, boardsMissing = 0, boardError = null;
+
+  for (const st of c.stations || []) {
+    const b = getBoard(st);
+    if (!b || b.error) { boardsMissing++; if (b && b.error) boardError = b.error; continue; }
+    const seen = new Set();
+    const evs = [].concat(b.dep || [], b.arr || []);
+    for (const ev of evs) {
+      if (!ev || ev.cancelled || !ev.tripId) continue;
+      const evT = Date.parse(ev.when || ev.plannedWhen);
+      if (isNaN(evT) || evT < nowMs - 12 * MIN || evT > nowMs + 65 * MIN) continue;
+      const tr = getTrip(ev.tripId, ev);
+      if (tr == null) { pending++; continue; }
+      if (tr.error) { failedTrips++; continue; }
+      const pas = passageFromTrip(c, tr.stops);
+      if (!pas) continue;
+      seen.add(ev.tripId);
+      const hasRt = typeof ev.delay === 'number';
+      const delay = hasRt ? ev.delay : (pas.delayHint != null ? pas.delayHint : 0);
+      const prev = byTrip.get(ev.tripId);
+      if (!prev || (hasRt && !prev.realtime)) {
+        byTrip.set(ev.tripId, {
+          tripId: ev.tripId,
+          passage: pas.planned + delay * 1000,
+          line: (ev.line && ev.line.name) || 'Zug',
+          dir: ev.direction ? '→ ' + ev.direction : (ev.provenance ? 'von ' + ev.provenance : ''),
+          delaySec: hasRt ? ev.delay : null,
+          realtime: hasRt,
+          station: st.name || ''
+        });
+      }
+    }
+    perStation[st.key != null ? st.key : st.id] = seen.size;
+  }
+
+  const passages = [...byTrip.values()]
+    .filter(p => p.passage >= nowMs - 3 * MIN && p.passage <= nowMs + 85 * MIN)
+    .sort((a, b) => a.passage - b.passage);
+  return { passages, perStation, pending, failedTrips, boardsMissing, boardError };
+}
+
+/* ---------- Schrankenfenster ---------- */
+function closedGroups(passages, preSec, postSec) {
+  const iv = passages
+    .map(p => ({ from: p.passage - preSec * 1000, to: p.passage + postSec * 1000, trains: [p] }))
+    .sort((a, b) => a.from - b.from);
+  const merged = [];
+  for (const cur of iv) {
+    const last = merged[merged.length - 1];
+    if (last && cur.from <= last.to) {
+      last.to = Math.max(last.to, cur.to);
+      last.trains.push(...cur.trains);
+    } else {
+      merged.push({ from: cur.from, to: cur.to, trains: [...cur.trains] });
+    }
+  }
+  return merged;
+}
+
+// ctx.passagesFor(crossing) -> Passagenliste oder null (noch keine verwertbaren Daten)
+function assessCrossing(crossing, ctx) {
+  const drive = ctx.mode === 'toWork' ? Number(crossing.minHome) || 0 : Number(crossing.minWork) || 0;
+  const arriveMs = ctx.nowMs + (ctx.shiftMin + drive) * MIN;
+  const res = {
+    id: crossing.id, name: crossing.name, driveMin: drive, arriveMs,
+    status: 'unknown', waitSec: 0, groups: [], upcoming: [], key: 1e6
+  };
+  const all = ctx.passagesFor(crossing);
+  if (!all) return res;
+
+  res.groups = closedGroups(all, ctx.preSec, ctx.postSec);
+  res.upcoming = all.filter(p => p.passage + ctx.postSec * 1000 >= ctx.nowMs).sort((a, b) => a.passage - b.passage);
+
+  const buf = ctx.bufferSec * 1000;
+  res.status = 'free';
+  for (const g of res.groups) {
+    if (arriveMs >= g.from && arriveMs <= g.to) {
+      res.status = 'closed';
+      res.waitSec = Math.round((g.to - arriveMs) / 1000);
+      break;
+    }
+    if (arriveMs + buf >= g.from && arriveMs - buf <= g.to) res.status = 'tight';
+  }
+  res.key = drive + 2 * (res.waitSec / 60) + (res.status === 'tight' ? 1 : 0); // Warten zählt doppelt
+  return res;
+}
+
+function rank(list) {
+  return [...list].sort((a, b) => a.key - b.key);
+}
+
+// Prüft, ob späteres Losfahren (bis maxShift Minuten) die Gesamtzeit verkürzt.
+function laterStartHint(crossings, ctx, maxShift) {
+  const now = rank(crossings.map(c => assessCrossing(c, ctx)))[0];
+  if (!now || now.status === 'unknown') return null;
+  let best = null;
+  for (let s = ctx.shiftMin + 1; s <= ctx.shiftMin + maxShift; s++) {
+    const top = rank(crossings.map(c => assessCrossing(c, { ...ctx, shiftMin: s })))[0];
+    if (!top || top.status === 'unknown') continue;
+    const total = (s - ctx.shiftMin) + top.key;
+    if (!best || total < best.total) best = { shift: s, waitFor: s - ctx.shiftMin, total, crossing: top };
+  }
+  if (best && best.total < now.key - 0.5) return best;
+  return null;
+}
+
+/* ---------- Bahnhöfe automatisch vorschlagen ----------
+   Nächster Bahnhof plus nächster Bahnhof auf der gegenüberliegenden Seite des Übergangs. */
+function pickStations(X, stations, maxM) {
+  const list = stations
+    .map(s => ({ s, d: distM(X, s) }))
+    .filter(o => o.d <= (maxM || 15000))
+    .sort((a, b) => a.d - b.d);
+  if (!list.length) return [];
+  const first = list[0];
+  const v1 = toXY(first.s, X);
+  const second = list.slice(1).find(o => {
+    const v2 = toXY(o.s, X);
+    const cos = (v1.x * v2.x + v1.y * v2.y) / (Math.hypot(v1.x, v1.y) * Math.hypot(v2.x, v2.y) || 1);
+    return cos < -0.3 && o.d > 400;
+  });
+  return second ? [first.s, second.s] : [first.s];
+}
+
+/* ---------- Transitous (MOTIS) -> interne Form ---------- */
+const tms = v => { if (!v) return null; const t = Date.parse(v); return isNaN(t) ? null : t; };
+const isoOf = ms => (ms == null ? null : new Date(ms).toISOString());
+
+// Antwort von /stoptimes. kind: 'dep' (Abfahrtstafel) oder 'arr' (Ankunftstafel)
+function motisEvents(j, kind) {
+  const out = [];
+  for (const s of (j && j.stopTimes) || []) {
+    const p = s.place || {};
+    const sched = kind === 'arr' ? p.scheduledArrival : p.scheduledDeparture;
+    const act = kind === 'arr' ? p.arrival : p.departure;
+    const ps = tms(sched || act), pa = tms(act || sched);
+    if (ps == null || !s.tripId) continue;
+    const rt = !!s.realTime && pa != null;
+    out.push({
+      tripId: s.tripId,
+      plannedWhen: isoOf(ps), when: isoOf(pa),
+      delay: rt ? Math.round((pa - ps) / 1000) : null,
+      cancelled: !!(s.cancelled || s.tripCancelled),
+      line: { name: s.displayName || s.routeShortName || '' },
+      direction: kind === 'dep' ? (s.headsign || '') : '',
+      provenance: kind === 'arr' && s.tripFrom ? (s.tripFrom.name || '') : ''
+    });
+  }
+  return out;
+}
+
+// Antwort von /trip (eine Fahrt als Reise mit Abschnitten) -> Halte mit Koordinaten und Zeiten
+function motisTrip(j) {
+  const legs = (j && (j.legs || (j.itinerary && j.itinerary.legs))) || [];
+  const stops = [];
+  for (const leg of legs) {
+    const list = [leg.from].concat(leg.intermediateStops || [], [leg.to]);
+    list.forEach((pl, idx) => {
+      if (!pl || !isFinite(pl.lat) || !isFinite(pl.lon)) return;
+      const last = idx === list.length - 1;
+      const planDep = tms(pl.scheduledDeparture) != null ? tms(pl.scheduledDeparture) : (idx === 0 ? tms(leg.scheduledStartTime) : null);
+      const dep = tms(pl.departure) != null ? tms(pl.departure) : (idx === 0 ? tms(leg.startTime) : null);
+      const planArr = tms(pl.scheduledArrival) != null ? tms(pl.scheduledArrival) : (last ? tms(leg.scheduledEndTime) : null);
+      const arr = tms(pl.arrival) != null ? tms(pl.arrival) : (last ? tms(leg.endTime) : null);
+      const prev = stops[stops.length - 1];
+      if (prev && Math.abs(prev.lat - pl.lat) < 1e-6 && Math.abs(prev.lon - pl.lon) < 1e-6) {   // Übergang zwischen Abschnitten derselben Fahrt
+        if (prev.planDep == null) prev.planDep = planDep;
+        if (prev.dep == null) prev.dep = dep;
+        if (prev.depDelay == null && dep != null && planDep != null) prev.depDelay = Math.round((dep - planDep) / 1000);
+        return;
+      }
+      stops.push({
+        lat: pl.lat, lon: pl.lon, planArr, planDep, arr, dep,
+        arrDelay: arr != null && planArr != null ? Math.round((arr - planArr) / 1000) : null,
+        depDelay: dep != null && planDep != null ? Math.round((dep - planDep) / 1000) : null
+      });
+    });
+  }
+  return stops;
+}
+
+/* ---------- Formatierung ---------- */
+function fmtTime(ms) {
+  const d = new Date(ms);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+function fmtDur(sec) {
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return sec + ' s';
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return s ? m + ' Min ' + s + ' s' : m + ' Min';
+}
+
+
+
+/* ---------- Konfiguration ---------- */
+const LS_KEY = 'schranken-check-v2';
+const DEFAULT_BASE = 'https://api.transitous.org/api';
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
+const SHIFTS = [0, 2, 5, 10];
+const MAX_STATIONS = 4;
+const uid = () => 'x' + Math.random().toString(36).slice(2, 8);
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function defaultConfig() { return { base: DEFAULT_BASE, preSec: 90, postSec: 30, bufferSec: 60, crossings: [] }; }
+function demoCrossings() {
+  const mk = (name, minHome, minWork) => ({ id: uid(), name, demo: true, minHome, minWork, stations: [] });
+  return [mk('Beispiel: Bahnhofstraße', 4, 9), mk('Beispiel: Mühlweg', 6, 6), mk('Beispiel: Industriestraße', 9, 3)];
+}
+function loadConfig() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) {
+      const c = JSON.parse(raw);
+      if (c && Array.isArray(c.crossings)) {
+        const cfg0 = Object.assign(defaultConfig(), c);
+        if (/transport\.rest/.test(cfg0.base || '')) cfg0.base = DEFAULT_BASE;   // alter Dienst ist gestört
+        return cfg0;
+      }
+    }
+  } catch (e) { /* Speicher nicht verfügbar */ }
+  return defaultConfig();
+}
+let cfg = loadConfig();
+function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(cfg)); } catch (e) { /* ignorieren */ } }
+const API = () => String(cfg.base || DEFAULT_BASE).replace(/\/+$/, '');
+const findC = id => cfg.crossings.find(c => c.id === id);
+const realCrossings = () => cfg.crossings.filter(c => !c.demo);
+
+const ui = {
+  mode: new Date().getHours() < 12 ? 'toWork' : 'toHome',
+  shift: 0,
+  boards: new Map(),      // Bahnhofs-ID -> { dep, arr } | { error }
+  errors: new Map(),      // Bahnhofs-ID -> letzte Fehlermeldung bei Aktualisierung
+  trips: new Map(),       // Fahrt-ID -> { stops } | { error, retryAt }
+  tripQueue: [], tripQueued: new Set(), tripRunning: 0, backoffUntil: 0,
+  readyOnce: new Set(), stats: {},
+  open: new Set(), advOpen: false, settingsOpen: false, confirm: null,
+  lastOk: null, busy: false, pick: null, diag: null
+};
+
+/* ---------- Netzwerk ---------- */
+async function fetchJson(url, ms) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms || 15000);
+  try {
+    const r = await fetch(url, { signal: ctl.signal });
+    if (!r.ok) {
+      if (r.status === 429 && url.indexOf(API()) === 0) ui.backoffUntil = Date.now() + 30000;
+      throw new Error('HTTP ' + r.status);
+    }
+    return await r.json();
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw new Error('Zeitüberschreitung');
+    if (e instanceof TypeError) throw new Error('keine Verbindung');
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+
+const boardKey = st => cfg.base + '|' + st.sid;
+const iso = ms => new Date(ms).toISOString();
+
+// Abfahrts- und Ankunftstafel einer Haltestelle (Transitous/MOTIS). Der Bahnhof liefert Züge in beide Richtungen.
+async function fetchBoard(st, nowMs) {
+  const url = (arriveBy, time) => API() + '/v6/stoptimes?stopId=' + encodeURIComponent(st.sid) + '&time=' + encodeURIComponent(iso(time)) + '&arriveBy=' + arriveBy + '&n=100';
+  const [d, a] = await Promise.all([
+    fetchJson(url(false, nowMs - 10 * MIN)),
+    fetchJson(url(true, nowMs + 80 * MIN))
+  ]);
+  return { dep: motisEvents(d, 'dep'), arr: motisEvents(a, 'arr') };
+}
+
+// Sucht zur Karten-Haltestelle die passende Haltestelle der Fahrplandaten (Name und Lage vergleichen)
+async function resolveStation(st) {
+  const url = API() + '/v1/geocode?text=' + encodeURIComponent(st.name) + '&type=STOP&numResults=8&place=' + st.lat + ',' + st.lon;
+  const j = await fetchJson(url);
+  const list = (Array.isArray(j) ? j : []).filter(r => r.id && (!r.type || r.type === 'STOP') && isFinite(r.lat) && isFinite(r.lon));
+  const norm = x => String(x || '').toLowerCase().replace(/[^a-zäöüß0-9]/g, '');
+  const near = r => distM(st, r);
+  const cand = list.filter(r => near(r) < 1500);
+  const exact = cand.filter(r => norm(r.name) === norm(st.name));
+  const partial = cand.filter(r => norm(r.name).includes(norm(st.name)) || norm(st.name).includes(norm(r.name)));
+  const pool = exact.length ? exact : partial.length ? partial : cand;
+  if (!pool.length) throw new Error('Haltestelle in den Fahrplandaten nicht gefunden');
+  pool.sort((x, y) => near(x) - near(y));
+  st.sid = String(pool[0].id);
+  delete st.error;
+  save();
+}
+
+async function refresh() {
+  if (ui.busy) { ui.again = true; return; }
+  ui.busy = true;
+  const nowMs = Date.now();
+  const unresolved = [];
+  for (const c of cfg.crossings) {
+    if (c.demo) continue;
+    for (const st of c.stations || []) if (!st.sid && !st.error && st.lat != null) unresolved.push(st);
+  }
+  await Promise.allSettled(unresolved.map(async st => {
+    try { await resolveStation(st); } catch (e) { st.error = String(e.message || e); save(); }
+  }));
+  const jobs = new Map();
+  for (const c of cfg.crossings) {
+    if (c.demo) continue;
+    for (const st of c.stations || []) if (st.sid && !jobs.has(boardKey(st))) jobs.set(boardKey(st), st);
+  }
+  const keys = [...jobs.keys()];
+  const results = await Promise.allSettled(keys.map(k => fetchBoard(jobs.get(k), nowMs)));
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') { ui.boards.set(keys[i], r.value); ui.errors.delete(keys[i]); ui.lastOk = Date.now(); }
+    else {
+      const msg = String(r.reason && r.reason.message || r.reason);
+      ui.errors.set(keys[i], msg);
+      if (!ui.boards.has(keys[i]) || ui.boards.get(keys[i]).error) ui.boards.set(keys[i], { error: msg });
+    }
+  });
+  ui.busy = false;
+  renderResult();
+  if (ui.again) { ui.again = false; refresh(); }
+}
+
+/* Zugverläufe: werden einmal geladen und dann gemerkt (Fahrplanzeiten ändern sich nicht) */
+async function fetchTrip(job) {
+  const j = await fetchJson(API() + '/v6/trip?tripId=' + encodeURIComponent(job.id));
+  const stops = motisTrip(j);
+  if (stops.length < 2) throw new Error('kein Zugverlauf');
+  return { stops };
+}
+
+function getTrip(tripId, ev) {
+  const t = ui.trips.get(tripId);
+  if (t) {
+    if (!t.error || Date.now() < t.retryAt) return t;
+    ui.trips.delete(tripId);
+  }
+  if (!ui.tripQueued.has(tripId)) {
+    ui.tripQueued.add(tripId);
+    ui.tripQueue.push({ id: tripId, lineName: ev && ev.line && ev.line.name });
+    setTimeout(pumpTrips, 0);
+  }
+  return null;
+}
+
+function pumpTrips() {
+  while (ui.tripRunning < 3 && ui.tripQueue.length && Date.now() >= ui.backoffUntil) {
+    const job = ui.tripQueue.shift();
+    ui.tripRunning++;
+    fetchTrip(job)
+      .then(res => ui.trips.set(job.id, res))
+      .catch(err => ui.trips.set(job.id, { error: String(err && err.message || err), retryAt: Date.now() + 5 * MIN }))
+      .finally(() => { ui.tripRunning--; ui.tripQueued.delete(job.id); scheduleRender(); pumpTrips(); });
+  }
+  if (ui.tripQueue.length && Date.now() < ui.backoffUntil) setTimeout(pumpTrips, ui.backoffUntil - Date.now() + 100);
+}
+let renderTimer = null;
+function scheduleRender() { if (renderTimer) return; renderTimer = setTimeout(() => { renderTimer = null; renderResult(); }, 250); }
+
+/* ---------- Demo ---------- */
+function demoPassages(idx, nowMs) {
+  const out = [], delays = [0, 60, 180, 0, 120, 0, 300];
+  const start = Math.floor((nowMs - 15 * MIN) / (15 * MIN)) * 15 * MIN;
+  for (let k = 0; k < 8; k++) for (let dirn = 0; dirn < 2; dirn++) {
+    const planned = start + k * 15 * MIN + ((3 + idx * 4 + dirn * 7) % 15) * MIN;
+    const d = delays[(Math.round(planned / (15 * MIN)) + dirn + idx) % delays.length];
+    out.push({ passage: planned + d * 1000, line: 'RB 12', dir: dirn ? '→ Nordstadt' : '→ Südstadt', delaySec: d, realtime: true, station: 'Demo' });
+  }
+  return out.filter(p => p.passage >= nowMs - 3 * MIN && p.passage <= nowMs + 85 * MIN).sort((a, b) => a.passage - b.passage);
+}
+
+/* ---------- Daten je Übergang ---------- */
+function crossingInfo(c, nowMs) {
+  if (c.demo) return { ready: true, passages: demoPassages(cfg.crossings.indexOf(c), nowMs), pending: 0, failedTrips: 0, perStation: {} };
+  if (!(c.stations || []).length) return { ready: false, reason: 'nostations', pending: 0, failedTrips: 0, perStation: {} };
+  const r = collectPassages(c, st => (st.sid ? ui.boards.get(boardKey(st)) || null : null), getTrip, nowMs);
+  const stationErr = c.stations.find(st => st.error);
+  r.ready = r.boardsMissing === 0 && (r.pending === 0 || ui.readyOnce.has(c.id));
+  if (r.ready) ui.readyOnce.add(c.id);
+  else r.reason = (r.boardError || stationErr) ? 'error' : 'loading';
+  r.errorText = r.boardError || (stationErr && stationErr.error) || '';
+  return r;
+}
+
+/* ---------- Anzeige: Ergebnis ---------- */
+function timelineHtml(a, nowMs) {
+  const end = Math.max(nowMs + 30 * MIN, a.arriveMs + 8 * MIN);
+  const span = end - nowMs;
+  const pos = t => Math.min(100, Math.max(0, ((t - nowMs) / span) * 100));
+  const segs = a.groups.filter(g => g.to > nowMs && g.from < end).map(g => {
+    const l = pos(g.from), r = pos(g.to);
+    return '<span class="seg-closed" style="left:' + l.toFixed(2) + '%;width:' + Math.max(0.4, r - l).toFixed(2) + '%"></span>';
+  }).join('');
+  return '<div class="tl" role="img" aria-label="Zeitstrahl: rot = Schranke geschlossen, schwarzer Strich = deine Ankunft">' + segs +
+    '<span class="me" style="left:calc(' + pos(a.arriveMs).toFixed(2) + '% - 1px)"></span></div>' +
+    '<div class="tl-scale"><span>jetzt</span><span>' + fmtTime(nowMs + span / 2) + '</span><span>' + fmtTime(end) + '</span></div>';
+}
+
+function trainsHtml(a) {
+  const items = a.upcoming.slice(0, 6).map(p => {
+    let d;
+    if (p.delaySec == null) d = '<span class="d">nur Fahrplan, keine Echtzeit</span>';
+    else if (p.delaySec >= 60) d = '<span class="late">+' + Math.round(p.delaySec / 60) + ' Min verspätet</span>';
+    else d = '<span class="d">pünktlich</span>';
+    return '<li><span class="t">' + fmtTime(p.passage) + '</span><span>' + esc(p.line) + (p.dir ? ' ' + esc(p.dir) : '') + ' · ' + d + '</span></li>';
+  }).join('');
+  return items ? '<ul>' + items + '</ul>' : '<p class="small">Keine Züge in den nächsten 80 Minuten erkannt.</p>';
+}
+
+function pillText(a, info) {
+  if (a.status === 'free') return 'Frei';
+  if (a.status === 'tight') return 'Knapp';
+  if (a.status === 'closed') return 'Zu · ' + fmtDur(a.waitSec);
+  if (info.reason === 'nostations') return 'Bahnhof fehlt';
+  if (info.reason === 'error') return 'Fehler';
+  return 'Lädt …';
+}
+
+const sigIcon = '<svg class="sig" aria-hidden="true"><use href="#andreas"/></svg>';
+
+function renderResult() {
+  const el = $('result');
+  const nowMs = Date.now();
+  const parts = [];
+  if (!cfg.crossings.length) {
+    el.innerHTML = '<div class="rec unknown">' + sigIcon + '<div><div class="kicker">Start</div><h2>Noch kein Bahnübergang</h2>' +
+      '<p>Wähle auf der Karte die Bahnübergänge, die auf deinem Weg liegen. Die Bahnhöfe daneben schlägt die App selbst vor.</p>' +
+      '<div class="acts"><button type="button" class="btn primary" data-act="map-crossing">Bahnübergang auf Karte wählen</button>' +
+      '<button type="button" class="btn" data-act="demo">Demo ansehen</button></div></div></div>';
+    return;
+  }
+
+  const infos = new Map(cfg.crossings.map(c => [c.id, crossingInfo(c, nowMs)]));
+  const ctx = {
+    mode: ui.mode, shiftMin: ui.shift, nowMs, preSec: cfg.preSec, postSec: cfg.postSec, bufferSec: cfg.bufferSec,
+    passagesFor: c => { const i = infos.get(c.id); return i && i.ready ? i.passages : null; }
+  };
+  ui.stats = {};
+  infos.forEach((i, id) => { ui.stats[id] = i.perStation || {}; });
+  const rows = rank(cfg.crossings.map(c => assessCrossing(c, ctx)));
+  const best = rows[0];
+
+  if (best.status === 'unknown') {
+    const list = [...infos.values()];
+    const loading = list.some(i => i.reason === 'loading');
+    const errs = list.some(i => i.reason === 'error');
+    const pend = list.reduce((s, i) => s + (i.pending || 0), 0);
+    let h, p;
+    if (loading) { h = 'Lade Zugdaten …'; p = pend ? 'Noch ' + pend + ' Züge werden geprüft.' : 'Die Bahnhöfe werden abgefragt.'; }
+    else if (errs) { h = 'Keine Daten'; p = 'Die Zugdaten konnten nicht geladen werden (' + esc(list.map(i => i.errorText).find(Boolean) || 'unbekannter Fehler') + '). Unter Einstellungen → Feineinstellungen zeigt „Verbindung testen“, woran es liegt.'; }
+    else { h = 'Bahnhöfe wählen'; p = 'Für die Übergänge sind noch keine Bahnhöfe gewählt.'; }
+    parts.push('<div class="rec unknown">' + sigIcon + '<div><div class="kicker">Empfehlung</div><h2>' + h + '</h2><p>' + p + '</p></div></div>');
+  } else {
+    const tone = best.status;
+    const head = tone === 'free' ? 'Über ' + esc(best.name)
+      : tone === 'tight' ? 'Über ' + esc(best.name) + ', knapp'
+      : rows.length > 1 ? 'Alle Übergänge zu. Kürzeste Zeit über ' + esc(best.name) : 'Schranke bei ' + esc(best.name) + ' ist zu';
+    const line = tone === 'free' ? 'Keine Schranke erwartet. Ankunft am Übergang gegen ' + fmtTime(best.arriveMs) + '.'
+      : tone === 'tight' ? 'Die Schranke schließt oder öffnet um deine Ankunftszeit (' + fmtTime(best.arriveMs) + ').'
+      : 'Du wartest etwa ' + fmtDur(best.waitSec) + '.';
+    const hint = laterStartHint(cfg.crossings, ctx, 10);
+    const hintHtml = hint ? '<p class="hint">Wenn du ' + hint.waitFor + ' Min später losfährst, ist ' + esc(hint.crossing.name) + ' frei (insgesamt etwa ' + Math.round(hint.total) + ' Min).</p>' : '';
+    parts.push('<div class="rec ' + tone + '">' + sigIcon + '<div><div class="kicker">Empfehlung</div><h2>' + head + '</h2><p>' + line + '</p>' + hintHtml + '</div></div>');
+  }
+
+  if (cfg.crossings.some(c => c.demo)) parts.push('<div class="notice">Demo-Fahrplan: Übergänge und Züge sind erfunden. Sobald du einen echten Bahnübergang wählst, verschwinden sie. <button type="button" class="btn sm" data-act="map-crossing">Bahnübergang auf Karte wählen</button></div>');
+  const failedAny = [...infos.values()].reduce((s, i) => s + (i.failedTrips || 0), 0);
+  if (failedAny) parts.push('<div class="notice">Bei ' + failedAny + ' Zügen fehlt der Fahrtverlauf. Sie sind in der Berechnung nicht enthalten.</div>');
+  if (ui.errors.size && ui.lastOk) parts.push('<div class="notice err">Aktualisierung fehlgeschlagen (' + esc([...ui.errors.values()][0]) + '). Es gelten die Daten von ' + fmtTime(ui.lastOk) + ' Uhr.</div>');
+
+  parts.push('<ul class="list">' + rows.map((a, i) => {
+    const info = infos.get(a.id);
+    const open = ui.open.has(a.id) ? ' open' : '';
+    const c = findC(a.id);
+    const metaExtra = c.demo ? '' : ' · ' + (c.stations || []).length + ((c.stations || []).length === 1 ? ' Bahnhof' : ' Bahnhöfe');
+    return '<li class="row"><div class="head"><div>' + (i === 0 && a.status !== 'unknown' ? '<div class="best-tag">Beste Wahl</div>' : '') +
+      '<div class="name">' + esc(a.name) + '</div><div class="meta">' + a.driveMin + ' Min Fahrt · Ankunft ' + fmtTime(a.arriveMs) + metaExtra + '</div></div>' +
+      '<span class="pill ' + a.status + '">' + pillText(a, info) + '</span></div>' +
+      (a.status === 'unknown' ? (info.reason === 'error' ? '<p class="small">' + esc(info.errorText) + '</p>' : '')
+        : timelineHtml(a, nowMs) + '<details class="trains" data-id="' + esc(a.id) + '"' + open + '><summary>Nächste Züge am Übergang</summary>' + trainsHtml(a) + '</details>') +
+      '</li>';
+  }).join('') + '</ul>');
+  parts.push('<p class="legend">Rot im Zeitstrahl: Schranke geschlossen (' + cfg.preSec + ' s vor bis ' + cfg.postSec + ' s nach dem Zug). Schwarzer Strich: deine Ankunft. Züge, die an den gewählten Bahnhöfen nicht halten, fehlen in den Daten.</p>');
+  parts.push('<div class="foot"><span>' + (ui.lastOk ? 'Stand ' + fmtTime(ui.lastOk) + ' Uhr' : 'Noch nicht geladen') + ' · Fahrplandaten: <a href="https://transitous.org/sources/" target="_blank" rel="noopener">Transitous</a></span><button type="button" data-act="refresh">' + (ui.busy ? 'Lädt …' : 'Jetzt aktualisieren') + '</button></div>');
+  el.innerHTML = parts.join('');
+  updateStatEls();
+}
+
+function renderControls() {
+  $('dir-work').setAttribute('aria-pressed', ui.mode === 'toWork');
+  $('dir-home').setAttribute('aria-pressed', ui.mode === 'toHome');
+  $('shift-chips').innerHTML = '<span class="lbl">Losfahren</span>' + SHIFTS.map(s =>
+    '<button type="button" class="chip" data-shift="' + s + '" aria-pressed="' + (ui.shift === s) + '">' + (s ? 'in ' + s + ' Min' : 'jetzt') + '</button>').join('');
+}
+
+/* ---------- Anzeige: Einstellungen ---------- */
+function field(id, label, value, attrs, type) {
+  return '<div class="field"><label for="' + id + '">' + label + '</label><input id="' + id + '" type="' + (type || 'number') + '" value="' + esc(value) + '" ' + attrs + '></div>';
+}
+
+function stationStatText(c, st) {
+  if (st.error) return { t: st.error, bad: true };
+  if (!st.sid) return { t: 'Haltestelle wird in den Fahrplandaten gesucht …', bad: false };
+  const n = (ui.stats[c.id] || {})[st.key];
+  if (n == null) return { t: 'Zugdaten laden …', bad: false };
+  if (n === 0) return { t: 'Kein Zug fährt hier über den Übergang. Falscher Bahnhof?', bad: true };
+  return { t: n + (n === 1 ? ' Zug' : ' Züge') + ' in der nächsten Stunde über den Übergang', bad: false };
+}
+
+function updateStatEls() {
+  document.querySelectorAll('[data-stat]').forEach(el => {
+    const [cid, key] = el.dataset.stat.split('|');
+    const c = findC(cid); if (!c) return;
+    const st = (c.stations || []).find(s => String(s.key) === key); if (!st) return;
+    const s = stationStatText(c, st);
+    el.textContent = s.t; el.classList.toggle('bad', s.bad);
+  });
+}
+
+function renderSettings() {
+  const el = $('settings');
+  el.hidden = !ui.settingsOpen;
+  $('btn-settings').setAttribute('aria-expanded', ui.settingsOpen);
+  if (!ui.settingsOpen) return;
+  const g = (k, label, v) => field('g-' + k, label, v, 'data-g="' + k + '" inputmode="numeric" min="0" step="5"');
+  let h = '<h2>Einstellungen</h2><div class="btns"><button type="button" class="btn primary" data-act="map-crossing">Bahnübergang auf Karte wählen</button></div>';
+  const real = realCrossings();
+  if (!real.length) h += '<p class="small">Noch keine eigenen Übergänge. Wähle einen auf der Karte, dann erscheint er hier mit Fahrzeiten und Bahnhöfen.</p>';
+  h += real.map((c, ci) => {
+    const p = 'c' + ci;
+    const stn = (c.stations || []).map(st => {
+      const s = stationStatText(c, st);
+      return '<li class="stn"><span class="nm">' + esc(st.name) + '</span><span class="st' + (s.bad ? ' bad' : '') + '" data-stat="' + c.id + '|' + esc(st.key) + '">' + esc(s.t) + '</span>' +
+        '<button type="button" class="btn sm danger" data-act="stn-del" data-cid="' + c.id + '" data-key="' + esc(st.key) + '">Entfernen</button></li>';
+    }).join('');
+    return '<div class="cross"><h3>' + esc(c.name) + '</h3><div class="grid">' +
+      field(p + '-name', 'Name', c.name, 'data-cid="' + c.id + '" data-f="name" autocomplete="off"', 'text') +
+      field(p + '-home', 'Fahrzeit ab Zuhause (Minuten)', c.minHome, 'data-cid="' + c.id + '" data-f="minHome" inputmode="decimal" min="0" step="0.5"') +
+      field(p + '-work', 'Fahrzeit ab Arbeit (Minuten)', c.minWork, 'data-cid="' + c.id + '" data-f="minWork" inputmode="decimal" min="0" step="0.5"') +
+      '</div><div><p class="small" style="margin-bottom:8px">Bahnhöfe an der Strecke</p>' +
+      (stn ? '<ul class="stn-list">' + stn + '</ul>' : '<p class="small">Noch kein Bahnhof gewählt.</p>') + '</div>' +
+      '<div class="btns"><button type="button" class="btn" data-act="map-stations" data-cid="' + c.id + '">Bahnhöfe auf Karte ändern</button>' +
+      (ui.confirm === c.id
+        ? '<button type="button" class="btn danger" data-act="cross-del" data-cid="' + c.id + '">Wirklich entfernen</button><button type="button" class="btn" data-act="cross-keep">Abbrechen</button>'
+        : '<button type="button" class="btn danger" data-act="cross-ask" data-cid="' + c.id + '">Übergang entfernen</button>') +
+      '</div></div>';
+  }).join('');
+
+  h += '<details class="adv" id="adv"' + (ui.advOpen ? ' open' : '') + '><summary>Feineinstellungen und Verbindungstest</summary><div class="grid">' +
+    g('preSec', 'Schranke schließt vor dem Zug (Sekunden)', cfg.preSec) +
+    g('postSec', 'Schranke öffnet nach dem Zug (Sekunden)', cfg.postSec) +
+    g('bufferSec', 'Sicherheitspuffer bei der Ankunft (Sekunden)', cfg.bufferSec) +
+    '</div><div class="grid" style="margin-top:12px">' + field('g-base', 'Adresse der Fahrplandaten (Transitous)', cfg.base, 'data-g="base" autocomplete="off" spellcheck="false"', 'url') +
+    field('g-tiles', 'Kachel-Adresse der Karte (leer = OpenStreetMap)', cfg.tiles || '', 'data-g="tiles" autocomplete="off" spellcheck="false" placeholder="https://…/{z}/{x}/{y}.png"', 'text') + '</div>' +
+    '<p class="small" style="margin-top:8px">Nur nötig, wenn die Karte grau bleibt oder du einen anderen Kartenanbieter nutzen willst. Ein eigener API-Schlüssel gehört direkt in diese Adresse, zum Beispiel …/{z}/{x}/{y}.png?key=DEIN_SCHLÜSSEL.</p>' +
+    '<div class="btns" style="margin-top:12px"><button type="button" class="btn" data-act="diag">Verbindung testen</button>' +
+    (ui.confirm === 'demo' ? '<button type="button" class="btn danger" data-act="demo-yes">Alle Übergänge durch Demo ersetzen</button><button type="button" class="btn" data-act="cross-keep">Abbrechen</button>'
+      : '<button type="button" class="btn" data-act="demo-ask">Demo ansehen</button>') + '</div>' +
+    '<div class="diag" id="diag" aria-live="polite">' + diagHtml() + '</div></details>';
+  el.innerHTML = h;
+}
+
+function diagHtml() {
+  if (!ui.diag) return '';
+  return ui.diag.map(d => '<span class="' + (d.ok === null ? '' : d.ok ? 'ok' : 'bad') + '">' + esc(d.text) +
+    (d.href ? ' <a href="' + esc(d.href) + '" target="_blank" rel="noopener">Adresse direkt öffnen</a>' : '') + '</span>').join('');
+}
+
+// Prüft die Kette Haltestellensuche, Abfahrtstafel, Zugverlauf. Unterscheidet "Server nicht erreichbar" von "Server antwortet mit Fehlerseite".
+async function probeApi() {
+  const out = [];
+  const g = API() + '/v1/geocode?text=' + encodeURIComponent('Hannover Hbf') + '&type=STOP&numResults=3';
+  let hit;
+  try {
+    const j = await fetchJson(g, 12000);
+    hit = (Array.isArray(j) ? j : []).find(r => r.id);
+    out.push({ ok: !!hit, text: 'Fahrplandaten, Haltestellensuche: ' + (hit ? 'erreichbar (' + hit.name + ')' : 'antwortet, aber ohne Treffer') });
+  } catch (e) {
+    if (e.message !== 'keine Verbindung') return [{ ok: false, text: 'Fahrplandaten: Fehler (' + e.message + ')', href: g }];
+    let reached = false;
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 10000);
+    try { await fetch(g, { mode: 'no-cors', signal: ctl.signal }); reached = true; } catch (e2) { /* nicht erreichbar */ }
+    clearTimeout(timer);
+    return [{
+      ok: false, href: g,
+      text: reached
+        ? 'Fahrplandaten: Der Server antwortet, aber mit einer Fehlerseite, die der Browser nicht lesen darf. Meist ist der Dienst gerade überlastet oder gestört.'
+        : 'Fahrplandaten: Der Server ist nicht erreichbar. Mögliche Gründe: Der Dienst ist gestört, oder ein Werbeblocker beziehungsweise DNS-Filter blockiert ihn.'
+    }];
+  }
+  if (!hit) return out;
+  let first;
+  try {
+    const d = await fetchJson(API() + '/v6/stoptimes?stopId=' + encodeURIComponent(hit.id) + '&time=' + encodeURIComponent(iso(Date.now())) + '&n=20', 15000);
+    const ev = motisEvents(d, 'dep');
+    first = ev[0] && ev[0].tripId;
+    const rt = ev.filter(x => typeof x.delay === 'number').length;
+    out.push({ ok: ev.length > 0, text: 'Fahrplandaten, Abfahrtstafel: ' + ev.length + ' Abfahrten, davon ' + rt + ' mit Echtzeit' });
+  } catch (e) { out.push({ ok: false, text: 'Fahrplandaten, Abfahrtstafel: Fehler (' + e.message + ')' }); return out; }
+  if (first) {
+    try { const t = await fetchTrip({ id: first }); out.push({ ok: true, text: 'Fahrplandaten, Zugverlauf: ' + t.stops.length + ' Halte mit Koordinaten' }); }
+    catch (e) { out.push({ ok: false, text: 'Fahrplandaten, Zugverlauf: Fehler (' + e.message + ')' }); }
+  }
+  return out;
+}
+
+async function runDiag() {
+  ui.diag = [{ ok: null, text: 'Teste …' }];
+  $('diag').innerHTML = diagHtml();
+  const out = [];
+  out.push(...await probeApi());
+  for (const url of OVERPASS) {
+    try { await overpassOne(url, '[out:json][timeout:10];node["railway"="station"](52.37,9.73,52.38,9.75);out body 1;'); out.push({ ok: true, text: 'Kartendaten ' + hostOf(url) + ': erreichbar' }); }
+    catch (e) { out.push({ ok: false, text: 'Kartendaten ' + hostOf(url) + ': Fehler (' + e.message + ')' }); }
+  }
+  out.push({ ok: !!window.L, text: 'Kartenbibliothek: ' + (window.L ? 'geladen' : 'nicht geladen') });
+  ui.diag = out;
+  const d = $('diag'); if (d) d.innerHTML = diagHtml();
+}
+
+/* ---------- Karte ---------- */
+const MAP = { map: null, tile: null, layers: {}, cross: new Map(), stations: new Map(), covers: [], busy: 0, err: '', geoTried: false, timer: null };
+
+function isDark() {
+  const t = document.documentElement.getAttribute('data-theme');
+  if (t) return t === 'dark';
+  return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+}
+const OSM_TILES = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+function setTiles() {
+  if (!MAP.map) return;
+  if (MAP.tile) MAP.map.removeLayer(MAP.tile);
+  const custom = String(cfg.tiles || '').trim();
+  $('map').classList.toggle('dark-tiles', isDark() && !custom);
+  MAP.tileErrors = 0;
+  MAP.tile = L.tileLayer(custom || OSM_TILES, {
+    maxZoom: 19,
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende'
+  });
+  if (MAP.tile.on) MAP.tile.on('tileerror', () => {
+    if (++MAP.tileErrors === 3) mapStatus('Die Kartenkacheln werden nicht geladen. Öffne die Datei über eine https-Adresse oder trage unter Einstellungen eine andere Kachel-Adresse ein.', true);
+  });
+  MAP.tile.addTo(MAP.map);
+}
+
+function initMap() {
+  if (MAP.map) return true;
+  if (!window.L) { mapStatus('Die Karte konnte nicht geladen werden. Prüfe die Internetverbindung und lade die Seite neu.', true); return false; }
+  MAP.map = L.map('map', { zoomControl: true }).setView([51.16, 10.45], 6);
+  setTiles();
+  MAP.layers.cross = L.layerGroup().addTo(MAP.map);
+  MAP.layers.mine = L.layerGroup().addTo(MAP.map);
+  MAP.layers.stations = L.layerGroup().addTo(MAP.map);
+  MAP.map.on('moveend', () => { clearTimeout(MAP.timer); MAP.timer = setTimeout(loadView, 400); });
+  MAP.map.on('click', e => {
+    if (!ui.pick || ui.pick.step !== 'crossing') return;
+    const c = { osm: 'm' + Date.now(), lat: e.latlng.lat, lon: e.latlng.lng, manual: true };
+    selectCrossing(c);
+  });
+  if (window.matchMedia) {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    if (mq.addEventListener) mq.addEventListener('change', setTiles);
+  }
+  return true;
+}
+
+function mapStatus(text, isErr) {
+  $('map-status-text').textContent = text;
+  $('map-status').classList.toggle('err', !!isErr);
+  $('map-retry').hidden = !(isErr && MAP.err);
+}
+
+function updateMapStatus() {
+  if (!ui.pick || !MAP.map) return;
+  if (MAP.err) return mapStatus(MAP.err, true);
+  if (ui.pick.step === 'stations') {
+    return mapStatus(MAP.busy ? 'Lade Bahnhöfe …' : 'Tippe auf Bahnhöfe, um sie an- oder abzuwählen. Blau gefüllt heißt gewählt.', false);
+  }
+  if (MAP.map.getZoom() < 13) return mapStatus('Zoome näher heran (ab Maßstab 13), dann erscheinen die Bahnübergänge als rote Punkte.', false);
+  if (MAP.busy) return mapStatus('Lade Bahnübergänge …', false);
+  const b = MAP.map.getBounds();
+  let n = 0; MAP.cross.forEach(c => { if (b.contains([c.lat, c.lon])) n++; });
+  mapStatus(n + (n === 1 ? ' Bahnübergang' : ' Bahnübergänge') + ' im Ausschnitt. Tippe auf einen roten Punkt oder setze einen Punkt von Hand.', false);
+}
+
+const hostOf = u => { try { return new URL(u).host; } catch (e) { return u; } };
+
+// Eine Anfrage an einen Overpass-Server. POST mit Formulardaten braucht keine CORS-Vorabprüfung.
+async function overpassOne(url, query, outer) {
+  const ctl = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; ctl.abort(); }, 20000);
+  if (outer) outer.addEventListener('abort', () => ctl.abort());
+  try {
+    const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(query), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctl.signal });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    if (j.remark && /error|timed out|out of memory/i.test(j.remark)) throw new Error(String(j.remark).slice(0, 80));
+    return j.elements || [];
+  } catch (e) {
+    if (e && e.name === 'AbortError') throw new Error(timedOut ? 'Zeitüberschreitung' : 'abgebrochen');
+    if (e instanceof TypeError) throw new Error('keine Verbindung');
+    throw e;
+  } finally { clearTimeout(timer); }
+}
+
+// Fragt die Server gestaffelt an (0, 2, 4, 6 Sekunden). Wer zuerst antwortet, gewinnt, die anderen werden abgebrochen.
+function overpass(query) {
+  const order = OVERPASS.slice();
+  if (MAP.goodMirror && order.indexOf(MAP.goodMirror) > 0) { order.splice(order.indexOf(MAP.goodMirror), 1); order.unshift(MAP.goodMirror); }
+  return new Promise((resolve, reject) => {
+    const ctls = order.map(() => new AbortController());
+    const timers = [];
+    const fails = [];
+    let done = false, left = order.length;
+    const finishFail = () => { if (--left === 0 && !done) reject(new Error(fails.join('; '))); };
+    order.forEach((url, i) => {
+      timers.push(setTimeout(() => {
+        if (done) return;
+        overpassOne(url, query, ctls[i].signal).then(els => {
+          if (done) return;
+          done = true; MAP.goodMirror = url;
+          timers.forEach(clearTimeout);
+          ctls.forEach((c, j) => { if (j !== i) c.abort(); });
+          resolve(els);
+        }).catch(e => { if (!done) fails.push(hostOf(url) + ': ' + e.message); finishFail(); });
+      }, i * 2000));
+    });
+  });
+}
+
+function ingestNodes(els) {
+  for (const e of els) {
+    if (e.type !== 'node') continue;
+    if (!e.tags) { MAP.cross.set(e.id, { osm: e.id, lat: e.lat, lon: e.lon }); continue; }  // 'out skel': nur Übergänge
+    const t = e.tags;
+    if (t.railway === 'level_crossing') MAP.cross.set(e.id, { osm: e.id, lat: e.lat, lon: e.lon });
+    else if ((t.railway === 'station' || t.railway === 'halt') && t.name) {
+      if (['subway', 'tram', 'funicular', 'monorail'].indexOf(t.station) >= 0) continue;
+      MAP.stations.set(e.id, { osm: e.id, lat: e.lat, lon: e.lon, name: t.name, sid: '' });
+    }
+  }
+}
+
+async function loadView() {
+  if (!MAP.map || !ui.pick) return;
+  if (ui.pick.step !== 'crossing') return;
+  if (MAP.map.getZoom() < 13) { drawMarkers(); updateMapStatus(); return; }
+  const b = MAP.map.getBounds();
+  const s = b.getSouth(), w = b.getWest(), n = b.getNorth(), e = b.getEast();
+  if (MAP.covers.some(c => s >= c[0] && w >= c[1] && n <= c[2] && e <= c[3])) { drawMarkers(); updateMapStatus(); return; }
+  const dh = (n - s) * 0.25, dw = (e - w) * 0.25;
+  const box = [s - dh, w - dw, n + dh, e + dw].map(v => v.toFixed(5));
+  MAP.busy++; MAP.err = ''; updateMapStatus();
+  try {
+    ingestNodes(await overpass('[out:json][timeout:20];node["railway"="level_crossing"](' + box.join(',') + ');out skel qt;'));
+    MAP.covers.push(box.map(Number));
+  } catch (err) { MAP.err = 'Bahnübergänge konnten nicht geladen werden. ' + err.message + ' Du kannst den Übergang auch von Hand setzen: Tippe auf der Karte genau auf die Stelle des Übergangs.'; }
+  MAP.busy--;
+  drawMarkers(); updateMapStatus();
+}
+
+const mkIcon = (cls, label) => L.divIcon({ className: '', html: '<span class="mk ' + cls + '"><i class="dot" style="font-style:normal">' + (label || '') + '</i></span>', iconSize: [36, 36], iconAnchor: [18, 18] });
+
+function drawMarkers() {
+  if (!MAP.map) return;
+  MAP.layers.cross.clearLayers(); MAP.layers.mine.clearLayers(); MAP.layers.stations.clearLayers();
+  if (!ui.pick) return;
+  const mine = realCrossings().filter(c => c.lat != null);
+  if (ui.pick.step === 'crossing') {
+    if (MAP.map.getZoom() >= 13) {
+      const b = MAP.map.getBounds().pad(0.2);
+      MAP.cross.forEach(c => {
+        if (!b.contains([c.lat, c.lon])) return;
+        const sel = ui.pick.sel && ui.pick.sel.osm === c.osm;
+        L.marker([c.lat, c.lon], { icon: mkIcon('mk-x' + (sel ? ' sel' : '')), keyboard: false, title: 'Bahnübergang' })
+          .on('click', () => selectCrossing(c)).addTo(MAP.layers.cross);
+      });
+    }
+    if (ui.pick.sel && ui.pick.sel.manual) {
+      L.marker([ui.pick.sel.lat, ui.pick.sel.lon], { icon: mkIcon('mk-x sel'), keyboard: false, title: 'Gesetzter Punkt' }).addTo(MAP.layers.cross);
+    }
+    mine.forEach(c => {
+      L.marker([c.lat, c.lon], { icon: mkIcon('mk-m', String(mine.indexOf(c) + 1)), keyboard: false, title: c.name })
+        .bindTooltip(esc(c.name), { direction: 'top', offset: [0, -14] })
+        .on('click', () => startStations(c.id)).addTo(MAP.layers.mine);
+    });
+  } else {
+    const cr = findC(ui.pick.cid); if (!cr) return;
+    L.marker([cr.lat, cr.lon], { icon: mkIcon('mk-m', String(mine.indexOf(cr) + 1)), keyboard: false, title: cr.name })
+      .bindTooltip(esc(cr.name), { direction: 'top', offset: [0, -14] }).addTo(MAP.layers.mine);
+    MAP.stations.forEach(s => {
+      if (distM(cr, s) > 15000) return;
+      const on = (cr.stations || []).some(x => x.osm === s.osm);
+      L.marker([s.lat, s.lon], { icon: mkIcon('mk-s' + (on ? '' : ' off'), 'Bf'), keyboard: false, title: s.name })
+        .bindTooltip(esc(s.name), { direction: 'top', offset: [0, -12], permanent: on })
+        .on('click', () => toggleStation(cr, s)).addTo(MAP.layers.stations);
+    });
+  }
+}
+
+function renderPickCard() {
+  const el = $('pick-card');
+  const p = ui.pick;
+  if (!p) { el.innerHTML = ''; return; }
+  if (p.step === 'crossing') {
+    if (!p.sel) {
+      el.innerHTML = '<p>Wähle den ersten Bahnübergang deiner Strecke. Weitere kannst du danach hinzufügen. Fehlt ein roter Punkt, tippe genau auf die Stelle des Übergangs, um ihn von Hand zu setzen.</p><div class="btns"><button type="button" class="btn" data-act="map-close">Schließen</button></div>';
+      return;
+    }
+    const dup = realCrossings().find(c => c.lat != null && distM(c, p.sel) < 20);
+    el.innerHTML = '<h3>' + esc(p.sel.name || (p.sel.manual ? 'Gesetzter Punkt' : 'Bahnübergang')) + '</h3>' +
+      (dup ? '<p>Dieser Übergang ist schon in deiner Liste.</p>' : '<p>Als Übergang übernehmen? Danach schlägt die App die Bahnhöfe an der Strecke vor.</p>') +
+      '<div class="btns">' + (dup ? '<button type="button" class="btn primary" data-act="map-stations" data-cid="' + dup.id + '">Bahnhöfe ändern</button>'
+        : '<button type="button" class="btn primary" data-act="cross-take">Übernehmen</button>') +
+      '<button type="button" class="btn" data-act="map-close">Schließen</button></div>';
+    return;
+  }
+  const c = findC(p.cid); if (!c) { el.innerHTML = ''; return; }
+  const chips = (c.stations || []).map(s => '<span class="stchip">' + esc(s.name) + '</span>').join('');
+  el.innerHTML = '<h3>Bahnhöfe für ' + esc(c.name) + '</h3>' +
+    '<div class="stchips">' + (chips || '<span class="small">Noch keiner gewählt</span>') + '</div>' +
+    '<p>Wähle Bahnhöfe, an denen die Züge dieser Strecke halten, am besten einen auf jeder Seite des Übergangs (höchstens ' + MAX_STATIONS + '). Die Richtung der Züge erkennt die App selbst.</p>' +
+    '<div class="btns"><button type="button" class="btn primary" data-act="map-close">Fertig</button></div>';
+}
+
+function selectCrossing(c) {
+  ui.pick.sel = { osm: c.osm, lat: c.lat, lon: c.lon, name: '', manual: !!c.manual };
+  drawMarkers(); renderPickCard();
+  reverseName(c);
+}
+
+async function reverseName(c) {
+  try {
+    const j = await fetchJson('https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=17&accept-language=de&lat=' + c.lat + '&lon=' + c.lon);
+    const a = j.address || {};
+    const road = a.road || a.pedestrian || a.path || a.hamlet || a.suburb || a.village || '';
+    const place = a.city || a.town || a.village || a.municipality || '';
+    const nm = road ? road + (place && place !== road ? ', ' + place : '') : '';
+    if (nm && ui.pick && ui.pick.sel && ui.pick.sel.osm === c.osm) { ui.pick.sel.name = nm; renderPickCard(); }
+  } catch (e) { /* Name bleibt allgemein */ }
+}
+
+function takeCrossing() {
+  const sel = ui.pick && ui.pick.sel; if (!sel) return;
+  cfg.crossings = cfg.crossings.filter(x => !x.demo);
+  const n = cfg.crossings.length + 1;
+  const c = { id: uid(), name: sel.name || ('Bahnübergang ' + n), lat: sel.lat, lon: sel.lon, minHome: 5, minWork: 5, stations: [] };
+  cfg.crossings.push(c); save();
+  renderResult();
+  startStations(c.id);
+}
+
+const stationRef = s => ({ key: String(s.osm), osm: s.osm, sid: s.sid || '', name: s.name, lat: s.lat, lon: s.lon });
+
+// Rückfall, wenn die Kartendaten nicht erreichbar sind: Bahnhöfe aus den Fahrplandaten (mit Haltestellen-ID)
+async function stationsFromApi(c) {
+  const dLat = 0.135, dLon = 0.135 / Math.cos(c.lat * Math.PI / 180);
+  const j = await fetchJson(API() + '/v6/map/stops?min=' + (c.lat - dLat).toFixed(5) + ',' + (c.lon - dLon).toFixed(5) + '&max=' + (c.lat + dLat).toFixed(5) + ',' + (c.lon + dLon).toFixed(5) + '&modes=RAIL&grouped=true', 20000);
+  let n = 0;
+  for (const r of Array.isArray(j) ? j : []) {
+    if (!r.stopId || !isFinite(r.lat) || !isFinite(r.lon) || !r.name) continue;
+    MAP.stations.set('t' + r.stopId, { osm: 't' + r.stopId, lat: r.lat, lon: r.lon, name: r.name, sid: String(r.stopId) }); n++;
+  }
+  if (!n) throw new Error('keine Bahnhöfe gefunden');
+}
+
+async function startStations(cid) {
+  const c = findC(cid); if (!c || c.lat == null) return;
+  ui.pick = { step: 'stations', cid };
+  $('mapSection').hidden = false;
+  if (!initMap()) { renderPickCard(); return; }
+  MAP.map.invalidateSize();
+  MAP.map.setView([c.lat, c.lon], 13);
+  MAP.err = ''; MAP.busy++; drawMarkers(); renderPickCard(); updateMapStatus();
+  try {
+    const dLat = 0.135, dLon = 0.135 / Math.cos(c.lat * Math.PI / 180);   // etwa 15 km, Rechteck ist schneller als Umkreis
+    const box = [c.lat - dLat, c.lon - dLon, c.lat + dLat, c.lon + dLon].map(v => v.toFixed(5)).join(',');
+    ingestNodes(await overpass('[out:json][timeout:20];(node["railway"="station"](' + box + ');node["railway"="halt"](' + box + '););out body;'));
+  } catch (err) {
+    try { await stationsFromApi(c); }
+    catch (err2) { MAP.err = 'Bahnhöfe konnten nicht geladen werden. Kartendaten: ' + err.message + ' Fahrplan: ' + err2.message; }
+  }
+  MAP.busy--;
+  if (!ui.pick || ui.pick.cid !== cid) return;
+  if (!(c.stations || []).length) {
+    const near = [...MAP.stations.values()];
+    c.stations = pickStations(c, near, 15000).map(stationRef);
+    save();
+  }
+  const pts = [[c.lat, c.lon]].concat((c.stations || []).map(s => [s.lat, s.lon]));
+  if (pts.length > 1) MAP.map.fitBounds(L.latLngBounds(pts).pad(0.3), { maxZoom: 15 });
+  drawMarkers(); renderPickCard(); updateMapStatus(); renderSettings(); refresh();
+}
+
+function toggleStation(c, s) {
+  c.stations = c.stations || [];
+  const i = c.stations.findIndex(x => x.osm === s.osm);
+  if (i >= 0) c.stations.splice(i, 1);
+  else if (c.stations.length >= MAX_STATIONS) { mapStatus('Höchstens ' + MAX_STATIONS + ' Bahnhöfe je Übergang. Wähle zuerst einen ab.', true); return; }
+  else c.stations.push(stationRef(s));
+  save(); MAP.err = '';
+  drawMarkers(); renderPickCard(); updateMapStatus(); renderSettings(); renderResult(); refresh();
+}
+
+function openCrossingMap() {
+  ui.pick = { step: 'crossing', sel: null };
+  $('mapSection').hidden = false;
+  if (!initMap()) { renderPickCard(); return; }
+  MAP.map.invalidateSize();
+  const mine = realCrossings().filter(c => c.lat != null);
+  if (mine.length) MAP.map.fitBounds(L.latLngBounds(mine.map(c => [c.lat, c.lon])).pad(0.5), { maxZoom: 14 });
+  else if (!MAP.geoTried) { MAP.geoTried = true; locate(true); }
+  drawMarkers(); renderPickCard(); updateMapStatus(); loadView();
+  $('mapSection').scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
+function closeMap() {
+  const wasStations = ui.pick && ui.pick.step === 'stations';
+  ui.pick = null;
+  $('mapSection').hidden = true;
+  if (wasStations) { ui.settingsOpen = true; renderSettings(); }
+  renderResult(); refresh();
+}
+
+function locate(quiet) {
+  if (!navigator.geolocation) { if (!quiet) mapStatus('Dieser Browser kann den Standort nicht bestimmen. Suche einen Ort.', true); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => { if (MAP.map) MAP.map.setView([pos.coords.latitude, pos.coords.longitude], 14); },
+    () => { if (!quiet) mapStatus('Standort nicht verfügbar. Suche stattdessen einen Ort.', true); else mapStatus('Standort nicht verfügbar. Suche einen Ort oder verschiebe die Karte.', false); },
+    { timeout: 8000, maximumAge: 300000 }
+  );
+}
+
+async function findPlace(q) {
+  mapStatus('Suche Ort …', false);
+  try {
+    const j = await fetchJson('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=de&accept-language=de&q=' + encodeURIComponent(q));
+    if (!Array.isArray(j) || !j.length) { mapStatus('Ort nicht gefunden.', true); return; }
+    MAP.map.setView([Number(j[0].lat), Number(j[0].lon)], 14);
+  } catch (e) { mapStatus('Ortssuche nicht möglich (' + e.message + ').', true); }
+}
+
+/* ---------- Ereignisse ---------- */
+$('dir-work').addEventListener('click', () => { ui.mode = 'toWork'; renderControls(); renderResult(); });
+$('dir-home').addEventListener('click', () => { ui.mode = 'toHome'; renderControls(); renderResult(); });
+$('shift-chips').addEventListener('click', e => {
+  const b = e.target.closest('[data-shift]'); if (!b) return;
+  ui.shift = Number(b.dataset.shift); renderControls(); renderResult();
+});
+$('btn-settings').addEventListener('click', () => { ui.settingsOpen = !ui.settingsOpen; renderSettings(); });
+$('btn-locate').addEventListener('click', () => locate(false));
+$('map-retry').addEventListener('click', () => {
+  if (!ui.pick) return;
+  MAP.err = ''; MAP.covers = [];
+  if (ui.pick.step === 'stations') startStations(ui.pick.cid); else loadView();
+});
+$('place-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const q = $('place-q').value.trim();
+  if (q && MAP.map) findPlace(q);
+});
+$('result').addEventListener('toggle', e => {
+  const d = e.target; if (!d.dataset || !d.dataset.id) return;
+  if (d.open) ui.open.add(d.dataset.id); else ui.open.delete(d.dataset.id);
+}, true);
+
+function act(e) {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const a = b.dataset.act, cid = b.dataset.cid;
+  if (a === 'refresh') { refresh(); renderResult(); return; }
+  if (a === 'map-crossing') { openCrossingMap(); return; }
+  if (a === 'map-stations') { startStations(cid); $('mapSection').scrollIntoView({ block: 'start', behavior: 'smooth' }); return; }
+  if (a === 'map-close') { closeMap(); return; }
+  if (a === 'cross-take') { takeCrossing(); return; }
+  if (a === 'demo') { cfg.crossings = demoCrossings(); save(); renderResult(); return; }
+  if (a === 'demo-ask') { ui.confirm = 'demo'; ui.advOpen = true; renderSettings(); return; }
+  if (a === 'demo-yes') { cfg.crossings = demoCrossings(); ui.confirm = null; save(); renderSettings(); renderResult(); return; }
+  if (a === 'diag') { runDiag(); return; }
+  if (a === 'cross-ask') { ui.confirm = cid; renderSettings(); return; }
+  if (a === 'cross-keep') { ui.confirm = null; renderSettings(); return; }
+  if (a === 'cross-del') { cfg.crossings = cfg.crossings.filter(c => c.id !== cid); ui.confirm = null; save(); renderSettings(); renderResult(); return; }
+  if (a === 'stn-del') {
+    const c = findC(cid); if (!c) return;
+    c.stations = (c.stations || []).filter(s => String(s.key) !== b.dataset.key);
+    save(); renderSettings(); renderResult(); return;
+  }
+}
+$('result').addEventListener('click', act);
+$('settings').addEventListener('click', act);
+$('pick-card').addEventListener('click', act);
+
+$('settings').addEventListener('toggle', e => { if (e.target.id === 'adv') ui.advOpen = e.target.open; }, true);
+$('settings').addEventListener('change', e => {
+  const t = e.target;
+  const num = v => Math.max(0, Number(String(v).replace(',', '.')) || 0);
+  if (t.dataset.g) {
+    const k = t.dataset.g;
+    cfg[k] = k === 'base' ? (t.value.trim() || DEFAULT_BASE) : k === 'tiles' ? t.value.trim() : num(t.value);
+    save();
+    if (k === 'tiles') { setTiles(); return; }
+    if (k === 'base') { ui.boards.clear(); ui.trips.clear(); ui.errors.clear(); ui.readyOnce.clear(); refresh(); } else renderResult();
+    return;
+  }
+  const f = t.dataset.f; if (!f) return;
+  const c = findC(t.dataset.cid); if (!c) return;
+  c[f] = f === 'name' ? t.value : num(t.value);
+  save(); renderResult();
+});
+
+/* ---------- Start ---------- */
+renderControls();
+renderSettings();
+renderResult();
+refresh();
+setInterval(refresh, 45000);
+setInterval(renderResult, 15000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+</script>
+</body>
+</html>
